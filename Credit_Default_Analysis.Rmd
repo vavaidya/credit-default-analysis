@@ -1,0 +1,1089 @@
+---
+title: "PM_final_project"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#PART 1 - LOGISTIC REGRESSION AND NAIVE BAYES
+
+```{r}
+### Library Imports ###
+library(glmnet)
+library(caret) #for confusion matrix
+library(e1071)
+library(data.table)
+
+### DATA LOADING , TEST/TRAIN SPLIT####
+
+raw=read.csv("cleansed_data.csv") 
+raw = na.omit(raw)
+
+raw=raw[,-1] #removing index column
+
+#Converting to factors
+factor_vars1 = c(2, 3, 4, 24)
+for (i in factor_vars1) {
+  raw[[i]]<-as.factor(raw[[i]])
+}
+
+set.seed(1)
+train = sample(1:nrow(raw),(0.8*nrow(raw)))
+test = (-train)
+
+train.data <- raw[train,]
+test.data <- raw[test,]
+
+
+### VARIABLE IMPORTANCE USING LASSO CV ###
+
+x=model.matrix(def_pay∼. + SEX*MARRIAGE + SEX*EDUCATION + MARRIAGE,raw)[,-1] ## Adding interaction terms
+y=raw$def_pay
+
+var_names = names(x[1,])
+var_count = rep(0, length(var_names))
+
+for(i in c(1:10)){
+  train = sample(1: nrow(x), (0.80)*nrow(x))
+  test=(-train)
+  cvfit.lasso = cv.glmnet(x[train,],y[train],
+                          alpha=1, family = "binomial", standardize = TRUE)
+  
+  lasso_coef = predict(cvfit.lasso, newx=x[test,],
+                       s = "lambda.min", type="coefficients")
+  var_used_index = lasso_coef[-2]
+  var_used_index = ifelse(var_used_index ==0, FALSE, TRUE)
+  var_count[var_used_index] = var_count[var_used_index] +1
+  print(paste0("done", i))
+}
+
+var_used_index_n = ifelse(var_count == 10, TRUE, FALSE)
+names(data.frame(x))[var_used_index_n]
+
+```
+
+
+```{r}
+### LOGISTIC REGRESSION ###
+logit.model <- glm(def_pay~ LIMIT_BAL.+SEX+MARRIAGE+PAY_1+PAY_2+
+                     PAY_3+PAY_4+PAY_5+PAY_6+BILL_AMT1.+PAY_AMT1.+PAY_AMT2.+PAY_AMT4.+PAY_AMT6.
+                   ,data=train.data, family = binomial(link = "logit"))
+logit.prob <- predict(logit.model,test.data,type = 'response')
+
+threshold.logit <- 0.50
+pred.logit <- ifelse(logit.prob > threshold.logit,1,0)
+
+confusionMatrix(table(pred.logit, test.data$def_pay))
+
+```
+
+
+```{r}
+
+### NAIVE BAYES MODEL ###
+naive.model = naiveBayes(def_pay~LIMIT_BAL.+SEX+MARRIAGE+PAY_1+PAY_2+PAY_3+PAY_4+PAY_5+PAY_6+BILL_AMT1.
+                         +PAY_AMT1.+PAY_AMT2.+PAY_AMT4.+PAY_AMT6., data=train.data, type="raw")
+
+naive.prob <- predict(naive.model, test.data, type='raw')
+naive.prob<-data.table((naive.prob))
+
+threshold.naive <- 0.50
+pred.naive <- ifelse(naive.prob$`1` > threshold.naive,1,0)
+
+confusionMatrix(table(pred.naive, test.data$def_pay))
+
+```
+
+
+#PART 2 - KNN CLASSIFICATION
+
+### KNN CLASSIFICATION WITHOUT NORMALIZATION
+
+### Reading the data
+
+```{r}
+rm(list=ls())
+library(tinytex)
+credit_default1=read.csv('cleansed_data.csv',header=T)
+credit_default1=credit_default1[-1]
+names(credit_default1)
+```
+
+### Converting categorical variables 
+
+```{r}
+factor_vars1 = c(2, 3, 4, 24, c(6:11))
+for (i in factor_vars1) {
+credit_default1[[i]]<-as.factor(credit_default1[[i]])
+}
+
+```
+
+### Splitting the data
+
+```{r}
+library(kknn)
+library(class)
+set.seed(33) 
+tr1 = sample(c(1:dim(credit_default1)[1]), 20000)
+train1 = credit_default1[tr1,]
+test1 = credit_default1[-tr1,]
+y_train1=credit_default1[tr1,24]
+y_test1=credit_default1[-tr1,24]
+```
+
+### KNN using out of sample predictions for k=50
+
+```{r}
+set.seed(33)
+library(caret)
+library(precrec)
+library(ROCit)
+library(plotROC)
+library(ggplot2)
+
+knn1=knn(train1,test1,cl=y_train1,k=50,prob=FALSE,use.all=FALSE)
+knn1_table=table(knn1,y_test1)
+accuracy <- function(x){sum(diag(x)/(sum(rowSums(x)))) * 100}
+
+x=accuracy(knn1_table)
+precision=posPredValue(knn1,y_test1,positive='1')
+recall=sensitivity(knn1,y_test1,positive = '1')
+F1=(2*precision*recall)/(precision+recall)
+
+print(knn1_table)
+cat("Accuracy is",x,"and misclassification rate is",100-x)
+cat("Precision is",precision,"and Recall is",recall)
+cat("F1 score is",F1)
+precrec_obj <- evalmod(scores = as.numeric(knn1), labels = y_test1)
+autoplot(precrec_obj)
+```
+
+### Finding the best k value
+
+```{r}
+set.seed(33)
+tr1 = sample(c(1:dim(credit_default1)[1]), 20000)
+train1 = credit_default1[tr1,]
+test1 = credit_default1[-tr1,]
+y_train1=credit_default1[tr1,24]
+y_test1=credit_default1[-tr1,24]
+k_list1=c(50,100,150,200)
+k_list1
+y=NULL
+for(i in k_list1){
+  knn2 = knn(train1,test1,cl=y_train1,k=i)
+  knn2_table=table(knn2,y_test1) 
+  
+  x=accuracy(knn2_table)
+  precision=posPredValue(knn2,y_test1,positive='1')
+  recall=sensitivity(knn2,y_test1,positive = '1')
+  F1=(2*precision*recall)/(precision+recall)
+  
+  x1=100-x
+  y=c(y,x1)
+}
+best = which.min(y)
+plot(k_list1,y,type="b",xlab="K Value",col="blue",ylab="Misclassification rate",lwd=2,cex.lab=1.2)
+cat("Best k value is",k_list1[best],"with misclassification rate of",y[best])
+precrec_obj <- evalmod(scores = as.numeric(knn2), labels = y_test1)
+autoplot(precrec_obj)
+```
+
+### K fold cross validation with kcv=10
+
+```{r}
+set.seed(33)
+train1 = credit_default1
+test1 = credit_default1
+y_train1=credit_default1[tr1,24]
+y_test1=credit_default1[-tr1,24]
+n=dim(credit_default1)[1]
+k_list1=c(20,50,100,150,200,250)
+kcv = 10
+n0 = round(n/kcv,0)
+set=1:n
+used = NULL
+y1=matrix(0,kcv,6)
+y2=matrix(0,kcv,6)
+y3=matrix(0,kcv,6)
+for(j in 1:kcv){
+  if(n0<length(set)){val = sample(set,n0)}
+  if(n0>=length(set)){val=set}
+    train_i = train1[-val,]
+    test_i = test1[val,]
+    y_train_i=credit_default1[-val,24]
+    y_test_i=credit_default1[val,24]
+    for(i in 1:6){
+     knn3 = knn(train_i,test_i,cl=y_train_i,k=k_list1[i])
+     knn3_table=table(knn3,y_test_i)
+     x1=accuracy(knn3_table)
+     x2=100-x1
+     precision=posPredValue(knn3,y_test_i,positive='1')
+     recall=sensitivity(knn3,y_test_i,positive = '1')
+     F1=(2*precision*recall)/(precision+recall)
+     
+     #cat(x2,"for k value",k_list1[i],"and fold",j,"\n")
+     y1[j,i]=x2
+     y2[j,i]=precision
+     y3[j,i]=recall
+    }
+  used = union(used,val)
+  set = (1:n)[-used]
+  cat(j,'\n')
+}  
+my1=apply(y1,2,mean)
+my2=apply(y2,2,mean)
+my3=apply(y3,2,mean)
+cat("Misclassification rate values:",my1)
+cat("Precision values:",my2)
+cat("Recall values:",my3)
+best = which.min(my1)
+plot(k_list1,my1,xlab="K value",ylab="Misclassification rate",col=4,lwd=2,type="l",cex.lab=1.2,main=paste("kfold(",kcv,")"))
+cat("Best k value is",k_list1[best],"with misclassification rate of",my1[best])
+```
+
+### K fold cross validation with kcv=5
+
+```{r}
+set.seed(33)
+train1 = credit_default1
+test1 = credit_default1
+y_train1=credit_default1[tr1,24]
+y_test1=credit_default1[-tr1,24]
+n=dim(credit_default1)[1]
+k_list1=c(20,50,100,150,200,250)
+kcv = 5
+n0 = round(n/kcv,0)
+set=1:n
+used = NULL
+y1=matrix(0,kcv,6)
+y2=matrix(0,kcv,6)
+y3=matrix(0,kcv,6)
+for(j in 1:kcv){
+  if(n0<length(set)){val = sample(set,n0)}
+  if(n0>=length(set)){val=set}
+    train_i = train1[-val,]
+    test_i = test1[val,]
+    y_train_i=credit_default1[-val,24]
+    y_test_i=credit_default1[val,24]
+    for(i in 1:6){
+     knn4 = knn(train_i,test_i,cl=y_train_i,k=k_list1[i])
+     knn4_table=table(knn4,y_test_i)
+     x1=accuracy(knn4_table)
+     x2=100-x1
+     precision=posPredValue(knn4,y_test_i,positive='1')
+     recall=sensitivity(knn4,y_test_i,positive = '1')
+     F1=(2*precision*recall)/(precision+recall)
+     
+     #cat(x2,"for k value",k_list1[i],"and fold",j,"\n")
+     y1[j,i]=x2
+     y2[j,i]=precision
+     y3[j,i]=recall
+    }
+  used = union(used,val)
+  set = (1:n)[-used]
+  cat(j,'\n')
+}  
+my1=apply(y1,2,mean)
+my2=apply(y2,2,mean)
+my3=apply(y3,2,mean)
+cat("Misclassification rate values:",my1)
+cat("Precision values:",my2)
+cat("Recall values:",my3)
+best = which.min(my1)
+plot(k_list1,my1,xlab="K value",ylab="Misclassification rate",col=4,lwd=2,type="l",cex.lab=1.2,main=paste("kfold(",kcv,")"))
+cat("Best k value is",k_list1[best],"with misclassification rate of",my1[best])
+```
+
+### KNN CLASSIFICATION WITH NORMALIZATION
+
+### Reading the data
+
+```{r}
+rm(list=ls())
+credit_default2=read.csv('cleansed_data.csv',header=T)
+credit_default2=credit_default2[-1]
+
+dim(credit_default2)
+```
+
+### Converting categorical variables 
+
+```{r}
+factor_vars2 = c(2, 3, 4, 24, c(6:11))
+for (i in factor_vars2) {
+credit_default2[[i]]<-as.factor(credit_default2[[i]])
+}
+
+```
+
+### Normalization
+
+```{r}
+normalize <- function(x) {
+return ((x - min(x)) / (max(x) - min(x))) }
+normalize_vars=c(1,5,c(12:23))
+for (i in normalize_vars) {
+credit_default2[[i]]=normalize(credit_default2[[i]])
+}
+summary(credit_default2)
+```
+
+### Splitting the data
+
+```{r}
+library(kknn)
+library(class)
+set.seed(33) 
+tr2 = sample(c(1:dim(credit_default2)[1]), 20000)
+train2 = credit_default2[tr2,]
+test2 = credit_default2[-tr2,]
+y_train2=credit_default2[tr2,24]
+y_test2=credit_default2[-tr2,24]
+```
+
+### KNN using out of sample predictions for k=50
+
+```{r}
+set.seed(33)
+knn5=knn(train2,test2,cl=y_train2,k=50,prob=FALSE,use.all=FALSE)
+knn5_table=table(knn5,y_test2)
+accuracy <- function(x){sum(diag(x)/(sum(rowSums(x)))) * 100}
+
+x=accuracy(knn5_table)
+precision=posPredValue(knn5,y_test2,positive='1')
+recall=sensitivity(knn5,y_test2,positive = '1')
+F1=(2*precision*recall)/(precision+recall)
+
+print(knn5_table)
+cat("Accuracy is",x,"and misclassification rate is",100-x)
+cat("Precision is",precision,"and Recall is",recall)
+cat("F1 score is",F1)
+precrec_obj <- evalmod(scores = as.numeric(knn5), labels = y_test2)
+autoplot(precrec_obj)
+```
+
+### Finding the best k value
+
+```{r}
+set.seed(33)
+tr2 = sample(c(1:dim(credit_default2)[1]), 20000)
+train2 = credit_default2[tr2,]
+test2 = credit_default2[-tr2,]
+y_train2=credit_default2[tr2,24]
+y_test2=credit_default2[-tr2,24]
+k_list2=c(5,10,15,20,50,100)
+k_list2
+y=NULL
+for(i in k_list2){
+  knn6 = knn(train2,test2,cl=y_train2,k=i)
+  knn6_table=table(knn6,y_test2) 
+  x=accuracy(knn6_table)
+  precision=posPredValue(knn6,y_test2,positive='1')
+  recall=sensitivity(knn6,y_test2,positive = '1')
+  F1=(2*precision*recall)/(precision+recall)
+  
+  x1=100-x
+  y=c(y,x1)
+}
+best = which.min(y)
+plot(k_list2,y,type="b",xlab="K Value",col="blue", ylab="Misclassification rate",lwd=2,cex.lab=1.2)
+cat("Best k value is",k_list2[best],"with misclassification rate of",y[best])
+precrec_obj <- evalmod(scores = as.numeric(knn6), labels = y_test2)
+autoplot(precrec_obj)
+```
+
+### K fold cross validation with kcv=10
+
+```{r}
+set.seed(33)
+train2 = credit_default2
+test2 = credit_default2
+y_train2=credit_default2[tr2,24]
+y_test2=credit_default2[-tr2,24]
+n=dim(credit_default2)[1]
+k_list2=c(5,10,20,50,100,150)
+kcv = 10
+n0 = round(n/kcv,0)
+set=1:n
+used = NULL
+y1=matrix(0,kcv,6)
+y2=matrix(0,kcv,6)
+y3=matrix(0,kcv,6)
+for(j in 1:kcv){
+  if(n0<length(set)){val = sample(set,n0)}
+  if(n0>=length(set)){val=set}
+    train_i = train2[-val,]
+    test_i = test2[val,]
+    y_train_i=credit_default2[-val,24]
+    y_test_i=credit_default2[val,24]
+    for(i in 1:6){
+     knn7 = knn(train_i,test_i,cl=y_train_i,k=k_list2[i])
+     knn7_table=table(knn7,y_test_i)
+     
+     x1=accuracy(knn7_table)
+     x2=100-x1
+     precision=posPredValue(knn7,y_test_i,positive='1')
+     recall=sensitivity(knn7,y_test_i,positive = '1')
+     F1=(2*precision*recall)/(precision+recall)
+     
+     cat(x2,"for k value",k_list2[i],"and fold",j,"\n")
+     y1[j,i]=x2
+     y2[j,i]=precision
+     y3[j,i]=recall
+    }
+  used = union(used,val)
+  set = (1:n)[-used]
+  cat(j,'\n')
+}  
+my1=apply(y1,2,mean)
+my2=apply(y2,2,mean)
+my3=apply(y3,2,mean)
+cat("Misclassification rate values:",my1)
+cat("Precision values:",my2)
+cat("Recall values:",my3)
+best = which.min(my1)
+plot(k_list2,my1,xlab="K value",ylab="Misclassification rate",col=4,lwd=2,type="l",cex.lab=1.2,main=paste("kfold(",kcv,")"))
+cat("Best k value is",k_list2[best],"with misclassification rate of",my1[best])
+```
+
+### K fold cross validation with kcv=5
+
+```{r}
+set.seed(33)
+train2 = credit_default2
+test2 = credit_default2
+y_train2=credit_default2[tr2,24]
+y_test2=credit_default2[-tr2,24]
+n=dim(credit_default2)[1]
+k_list2=c(5,10,20,50,100,150)
+kcv = 5
+n0 = round(n/kcv,0)
+set=1:n
+used = NULL
+y1=matrix(0,kcv,6)
+y2=matrix(0,kcv,6)
+y3=matrix(0,kcv,6)
+for(j in 1:kcv){
+  if(n0<length(set)){val = sample(set,n0)}
+  if(n0>=length(set)){val=set}
+    train_i = train2[-val,]
+    test_i = test2[val,]
+    y_train_i=credit_default2[-val,24]
+    y_test_i=credit_default2[val,24]
+    for(i in 1:6){
+     knn7 = knn(train_i,test_i,cl=y_train_i,k=k_list2[i])
+     knn7_table=table(knn7,y_test_i)
+     
+     x1=accuracy(knn7_table)
+     x2=100-x1
+     precision=posPredValue(knn7,y_test_i,positive='1')
+     recall=sensitivity(knn7,y_test_i,positive = '1')
+     F1=(2*precision*recall)/(precision+recall)
+     
+     cat(x2,"for k value",k_list2[i],"and fold",j,"\n")
+     y1[j,i]=x2
+     y2[j,i]=precision
+     y3[j,i]=recall
+    }
+  used = union(used,val)
+  set = (1:n)[-used]
+  cat(j,'\n')
+}  
+my1=apply(y1,2,mean)
+my2=apply(y2,2,mean)
+my3=apply(y3,2,mean)
+cat("Misclassification rate values:",my1)
+cat("Precision values:",my2)
+cat("Recall values:",my3)
+best = which.min(my1)
+plot(k_list2,my1,xlab="K value",ylab="Misclassification rate",col=4,lwd=2,type="l",cex.lab=1.2,main=paste("kfold(",kcv,")"))
+cat("Best k value is",k_list2[best],"with misclassification rate of",my1[best])
+```
+
+### KNN with normalization and SMOTE
+
+### Reading the data
+
+```{r}
+rm(list=ls())
+
+credit_default3=read.csv('cleansed_data.csv',header=T)
+credit_default3=credit_default3[-1]
+
+```
+
+### Converting categorical variables
+
+```{r}
+factor_vars3 = c(2, 3, 4, 24, c(6:11))
+for (i in factor_vars3) {
+credit_default3[[i]]<-as.factor(credit_default3[[i]])
+}
+
+```
+
+### Normalization
+
+```{r}
+normalize <- function(x) {
+return ((x - min(x)) / (max(x) - min(x))) }
+normalize_vars=c(1,5,c(12:23))
+for (i in normalize_vars) {
+credit_default3[[i]]=normalize(credit_default3[[i]])
+}
+
+```
+
+### Splitting the data
+
+```{r}
+library(kknn)
+library(class)
+set.seed(33) 
+tr3 = sample(c(1:dim(credit_default3)[1]), 20000)
+train3 = credit_default3[tr3,]
+test3 = credit_default3[-tr3,]
+y_train3=credit_default3[tr3,24]
+y_test3=credit_default3[-tr3,24]
+prop.table(table(y_test3))
+```
+
+```{r}
+library(DMwR)
+library(dplyr)
+train3$def_pay <- as.factor(train3$def_pay)
+train3 <- SMOTE(train3$def_pay ~ ., train3, perc.over = 100, perc.under=200)
+train3$def_pay <- as.numeric(train3$def_pay)
+train3$def_pay=ifelse(train3$def_pay==2,1,0)
+prop.table(table(train3$def_pay))
+```
+
+```{r}
+library(caret)
+library(precrec)
+library(ROCit)
+library(plotROC)
+library(ggplot2)
+
+set.seed(33)
+knn9=knn(train3,test3,cl=train3$def_pay,k=50,prob=FALSE,use.all=FALSE)
+knn9_table=table(knn9,y_test3)
+accuracy <- function(x){sum(diag(x)/(sum(rowSums(x)))) * 100}
+
+x=accuracy(knn9_table)
+precision=posPredValue(knn9,test3$def_pay,positive='1')
+recall=sensitivity(knn9,test3$def_pay,positive = '1')
+F1=(2*precision*recall)/(precision+recall)
+
+
+print(knn9_table)
+cat("Accuracy is",x,"and misclassification rate is",100-x)
+cat("Precision is",precision,"and Recall is",recall)
+cat("F1 score is",F1)
+precrec_obj <- evalmod(scores = as.numeric(knn9), labels = y_test3)
+autoplot(precrec_obj)
+```
+
+### K fold cross validation with kcv=10
+
+```{r}
+set.seed(33)
+test3 = credit_default3
+y_test3=credit_default3[-tr3,24]
+n=dim(credit_default3)[1]
+k_list3=c(5,10,20,50,100,150)
+kcv = 10
+n0 = round(n/kcv,0)
+set=1:n
+used = NULL
+y1=matrix(0,kcv,6)
+y2=matrix(0,kcv,6)
+y3=matrix(0,kcv,6)
+for(j in 1:kcv){
+  if(n0<length(set)){val = sample(set,n0)}
+  if(n0>=length(set)){val=set}
+    train_i = train3[-val,]
+    test_i = test3[val,]
+    y_test_i=credit_default3[val,24]
+    for(i in 1:6){
+     knn10 = knn(train_i,test_i,cl=train_i$def_pay,k=k_list3[i])
+     knn10_table=table(knn10,y_test_i)
+     
+     x1=accuracy(knn10_table)
+     x2=100-x1
+     precision=posPredValue(knn10,y_test_i,positive='1')
+     recall=sensitivity(knn10,y_test_i,positive = '1')
+     F1=(2*precision*recall)/(precision+recall)
+     
+     cat(x2,"for k value",k_list3[i],"and fold",j,"\n")
+     y1[j,i]=x2
+     y2[j,i]=precision
+     y3[j,i]=recall
+    }
+  used = union(used,val)
+  set = (1:n)[-used]
+  cat(j,'\n')
+}  
+my1=apply(y1,2,mean)
+my2=apply(y2,2,mean)
+my3=apply(y3,2,mean)
+cat("Misclassification rate values:",my1)
+cat("Precision values:",my2)
+cat("Recall values:",my3)
+best = which.min(my1)
+plot(k_list3,my1,xlab="K value",ylab="Misclassification rate",col=4,lwd=2,type="l",cex.lab=1.2,main=paste("kfold(",kcv,")"))
+cat("Best k value is",k_list3[best],"with misclassification rate of",my1[best])
+```
+
+#PART - 3 DECISION TREES
+
+```{r}
+# Fitting Classification Trees
+rm(list=ls())
+library(tree)
+df = read.csv('cleansed_data.csv')
+df$ID = NULL
+
+train_sample = sample(c(1:dim(df)[1]), 20000)
+train = df[train_sample,]
+test = df[-train_sample,]
+ytrain = train$def_pay
+ytest = test$def_pay
+
+tree.credit = tree(factor(def_pay)~.,data=train)
+summary(tree.credit)
+plot(tree.credit)
+text(tree.credit, pretty =0)
+
+
+```
+```{r}
+#In order to properly evaluate the performance of a classification tree on these data
+#We must estimate the test error rather than simply computing the training error.
+tree.pred = predict(tree.credit, test ,type ="class")
+table(tree.pred, ytest)
+
+```
+```{r}
+#The function cv.tree() performs cross-validation in order to 
+#cv.tree() determine the optimal level of tree complexity;
+set.seed (3)
+cv.credit =cv.tree(tree.credit,FUN=prune.misclass)
+
+par(mfrow =c(1,2))
+plot(cv.credit$size, cv.credit$dev ,type="b")
+plot(cv.credit$k, cv.credit$dev ,type="b")
+
+```
+```{r}
+prune.credit =prune.misclass (tree.credit, best =2)
+plot(prune.credit)
+text(prune.credit,pretty =0)
+summary(prune.credit)
+
+```
+```{r}
+
+tree.pred.prune=predict (prune.credit, test ,type="class")
+table(tree.pred.prune, ytest)
+
+
+```
+
+```{r}
+################################################################################
+library(tree)
+library(rpart)
+library(rpart.plot)
+
+#fit a big tree using rpart.control
+big.tree = rpart(def_pay ~ .,method="class",data=train,
+                 control=rpart.control(minsplit=5,cp=.0005))
+nbig = length(unique(big.tree$where))
+cat('size of big tree: ',nbig,'\n')
+rpart.plot(big.tree)
+
+#--------------------------------------------------
+#look at cross-validation
+par(mfrow=c(1,1))
+plotcp(big.tree, col = 'orange')
+
+#--------------------------------------------------
+#show fit from some trees
+bestcp=big.tree$cptable[which.min(big.tree$cptable[,"xerror"]),"CP"]
+cat('bestcp: ',bestcp,'\n')
+
+ptree = prune(big.tree,cp=bestcp)
+rpart.plot(ptree)
+```
+
+# PART 4 - RANDOM FOREST
+
+```{r}
+library(randomForest)
+
+# Read in data
+data = read.csv("cleansed_data.csv")
+
+# Take Id out of dataset
+credit.card = data[, !names(data) == "ID"]
+
+# Factorize the categorical variables
+cate_vari = c(2:4,6:11,24)
+for (i in cate_vari){
+  credit.card[[i]] = as.factor(credit.card[[i]])
+}
+
+# Split the data into training set and testing set
+# We agree on using 2/3 data for train
+train = sample(1:nrow(credit.card), 20000)
+test = (-train)
+```
+
+```{r}
+# Pick n_tree using cross validation.
+# We tried: n.list = seq(50,1000,length=20) | k=6 for extual result which shows in graph and yieds best result ntree = 600. But it was time consuming. So for this turn-in code just test 3 btree value.
+n.list = c(30, 60, 120)
+k = 3
+n.samp = round(nrow(credit.card)/k) # determine the train size for k-fold
+iAccuracyMx = matrix(0, k, length(n.list)) # matrix records in sample accuracy
+accuracyMx = matrix(0, k, length(n.list)) # out-of-sample accuracy matrix 
+used = NULL
+set = 1:nrow(credit.card) 
+for (ki in 1:k){
+  # determine number of each fold in case data cant be split evenly for each fold
+  if (length(set)>=n.samp) {val=n.samp}  
+  if (length(set)<n.samp) {val=length(set)}
+  test.cv = sample(set, val)
+  train.cv = (-test.cv)
+  for (ni in 1:length(n.list)){
+    cat('Now is processing:', ki, ni, "\n")
+    set.seed(7)
+    rf.fit = randomForest(def_pay~., data = credit.card[train.cv,], 
+                           ntree = n.list[ni], importance = T, mtry=23)
+    rf.pred = predict(rf.fit, newdata = credit.card[test.cv,])
+    # Geting in-sample accuracy
+    iAccuracyMx[ki, ni] = mean(rf.fit$predicted==credit.card$def_pay[train.cv])
+    # Getting out-of sample accuracy
+    accuracyMx[ki, ni] = mean(rf.pred==credit.card$def_pay[test.cv]) 
+    
+  used = union(used, test.cv) # update valication set for other folds 
+  set = (1:nrow(credit.card))[-used]
+  }
+}
+```
+
+```{r}
+# Calculate the average error for each ntree
+mError = 1-apply(accuracyMx, 2, mean) # Geting out-of-sample misclassification
+imError = 1-apply(iAccuracyMx, 2, mean) # Geting in sample misclassification
+intree = which.min(mError) # index for best ntree
+
+# Plot the both in sample and out of sample error rates
+plot(n.list, mError, col="red", pch=17, type = 'b', 
+     main="Cross Valication for Tunning ntree",
+     xlab = "Number of Trees (B)",
+     ylab = "Error Rate")
+lines(n.list, imError, col="blue", pch=16, type = 'b', lty=2)
+points(n.list[intree], min(mError), col = "green", pch = 17, cex = 1.8)
+legend("topright", 
+       c("Out-of-sample error", "In-sample error", "Best ntree: 120"),
+       col = c("red", "blue", "green"), lty = 1:2)
+```
+
+```{r}
+# Selecting best mtry using cross validation
+mtry.list = c(2,3,10) # tried mtry.list = 1:23 | k =5 for actual analysis & got best mtry = 3. Here using simple version to demenstrate, saving running time. 
+k2 = 3
+n.samp2 = round(nrow(credit.card)/k2)
+iAccuracyMx2 = matrix(0, k2, length(mtry.list))
+accuracyMx2 = matrix(0, k2, length(mtry.list))
+used = NULL
+set = 1:nrow(credit.card)
+for (ki in 1:k2){
+  if (length(set)>=n.samp2) {val=n.samp2}
+  if (length(set)<n.samp2) {val=length(set)}
+  test.cv = sample(set, val)
+  train.cv = (-test.cv)
+  for (mti in 1:length(mtry.list)){
+    cat('Now is processing:', ki, mti, "\n")
+    set.seed(7)
+    rf.fit = randomForest(def_pay~., data = credit.card[train.cv,], 
+                           ntree = 120, importance = T, 
+                           mtry = mtry.list[mti]) # in actual analysis use ntree=600
+    rf.pred = predict(rf.fit, newdata = credit.card[test.cv,])
+    iAccuracyMx2[ki, mti]= mean(rf.fit$predicted==credit.card$def_pay[train.cv])
+    accuracyMx2[ki, mti] = mean(rf.pred==credit.card$def_pay[test.cv])
+  used = union(used, test.cv)
+  set = (1:nrow(credit.card))[-used]
+  }
+}
+```
+
+```{r}
+# Calculate the average error for each mtry
+mError2 = 1-apply(accuracyMx2, 2, mean)
+imError2 = 1-apply(iAccuracyMx2, 2, mean)
+imtry = which.min(mError2) # index of best mtry
+
+# Plot the both in sample and out of sample errors
+plot(mtry.list, mError2, col="red", pch=17, type = 'b', 
+     main="Cross Valication for Tunning mtry",
+     xlab = "Number of Variable Used for Each Split",
+     ylab = "Error Rate")
+lines(mtry.list, imError2, col="blue", pch=16, type = 'b', lty=2)
+points(mtry.list[imtry], min(mError2), col = "green", pch = 17, cex = 1.8)
+legend("topright", 
+       c("Out of sample error", "In sample error", "Best mtry: 3"),
+       col = c("red", "blue", "green"), lty = 1:2)
+```
+
+```{r}
+# Use the best mtry = 3, and best ntree = 600 retrain the data
+rf.fit_best = randomForest(def_pay~., data = credit.card[train,],mtry=3,ntree = 120, importance = T) # in analysis we use ntree=600
+# Predict test set 
+set.seed(7)
+rf.pred_best = predict(rf.fit_best, newdata = credit.card[test,])
+table(rf.pred_best, credit.card$def_pay[test]) # make confusion matrix
+```
+
+```{r}
+cat("Random forest correct rate with mtry = 3:", # Showing accuracy
+    mean(rf.pred_best ==credit.card$def_pay[test]))
+```
+
+```{r}
+# Check importance
+importance(rf.fit_best)
+```
+
+```{r}
+varImpPlot(rf.fit_best)
+```
+
+#PART 5 - XG BOOST
+
+### process data
+
+```{r data}
+library(xgboost)
+df = read.csv('cleansed_data.csv')
+df$ID = NULL
+
+
+# factorize
+# factor_vars1 = c(2, 3, 4, 24, c(6:11))
+# for (i in factor_vars1) {
+# df[[i]]<-as.factor(df[[i]])
+# }
+
+## sampling
+set.seed(33)
+tr = sample(c(1:dim(df)[1]), 20000)
+train = df[tr,]
+test = df[-tr,]
+y_tr = train$def_pay
+y_ts = test$def_pay
+
+dim(df)
+summary(df)
+```
+
+### xgb model before tuning
+
+```{r xgb}
+xgb <- xgboost(data = data.matrix(train[,1:23]), 
+ label = data.matrix(y_tr), 
+ eta = 1,
+ max_depth = 6, 
+ nround=300, 
+ subsample = 1,
+ colsample_bytree = 1,
+ lambda = 1,
+ seed = 33,
+ eval_metric = "error",
+ objective = "binary:logistic",
+)
+```
+
+### result before tuning on test dataset, output is accuracy rate
+
+```{r predict}
+y_test <- predict(xgb, data.matrix(test[,1:23]))
+y_test[y_test < 0.5] = 0
+y_test[y_test > 0.5] = 1
+1 - sum(y_test == y_ts)/length(y_ts)
+```
+
+```{r}
+y_prediction = y_test
+tbl = table(y_prediction, y_ts)
+print(tbl)
+print(paste("Precision: ", tbl[2,2]/sum(tbl[2,])))
+print(paste("Recall: ", tbl[2,2]/sum(tbl[,2])))
+
+library(caret)
+precision <- posPredValue(as.factor(y_prediction), as.factor(y_ts), positive="1")
+recall <- sensitivity(as.factor(y_prediction), as.factor(y_ts), positive="1")
+print(paste("Precision: ", precision))
+print(paste("Recall: ", recall))
+
+```
+
+### xgb model after tuning
+
+```{r xgb2}
+xgb <- xgboost(data = data.matrix(train[,1:23]), 
+ label = data.matrix(y_tr), 
+ eta = 0.05,
+ max_depth = 3, 
+ nround=10, 
+ subsample = 1,
+ colsample_bytree = 1,
+ lambda = 10,
+ seed = 33,
+ eval_metric = "error",
+ objective = "binary:logistic",
+)
+```
+
+### result after tuning on test dataset, output is accuracy rate
+
+```{r predict2}
+y_test <- predict(xgb, data.matrix(test[,1:23]))
+y_test[y_test < 0.5] = 0
+y_test[y_test > 0.5] = 1
+1 - sum(y_test == y_ts)/length(y_ts)
+
+```
+
+```{r}
+y_prediction = y_test
+tbl = table(y_prediction, y_ts)
+print(tbl)
+print(paste("Precision: ", tbl[2,2]/sum(tbl[2,])))
+print(paste("Recall: ", tbl[2,2]/sum(tbl[,2])))
+
+precision <- posPredValue(as.factor(y_prediction), as.factor(y_ts), positive="1")
+recall <- sensitivity(as.factor(y_prediction), as.factor(y_ts), positive="1")
+print(paste("Precision: ", precision))
+print(paste("Recall: ", recall))
+```
+
+
+
+### feature importance
+
+**Gain** 
+
+is the improvement in accuracy brought by a feature to the branches it is on. The idea is that before adding a new split on a feature X to the branch there was some wrongly classified elements, after adding the split on this feature, there are two new branches, and each of these branch is more accurate (one branch saying if your observation is on this branch then it should be classified as 1, and the other branch saying the exact opposite).
+
+**Cover**
+
+measures the relative quantity of observations concerned by a feature.
+
+**Frequency**
+
+is a simpler way to measure the Gain. It just counts the number of times a feature is used in all generated trees. You should not use it (unless you know why you want to use it).
+
+```{r feature importance}
+
+xgb.importance(model = xgb)
+
+```
+
+### CV: iterates by nrounds
+
+```{r CV}
+nrounds = 500
+
+credit = xgb.DMatrix(as.matrix(train[,1:23]), label = as.matrix(y_tr))
+
+cv <- xgb.cv(data = credit, nrounds = nrounds, nfold = 5, metrics = "error",
+                  max_depth = 6, eta = 0.3, objective = "binary:logistic",
+                subsample = 1, colsample_bytree = 1, seed = 33, 
+                lambda = 20, verbose = 0)
+print(cv)
+```
+
+### visualize CV result: we don't really need a lot of trees
+
+Conclusion: 10 trees would work ok
+
+```{r CV2}
+plot(c(1:nrounds), cv[4]$evaluation_log$test_error_mean, xlab = 'number of trees', ylab = 'error', type = 'l')
+```
+
+### how does the depth of each tree affects error
+
+Conclusion: 3 splits for each tree seems to be optimized
+
+```{r depthoftrees}
+start_time <- Sys.time()
+minError = c()
+
+for(i in c(2:10)){
+        cv <- xgb.cv(data = credit, nrounds = 10, nfold = 5, metrics = "error",
+                  max_depth = i, eta = 0.3, objective = "binary:logistic",
+                subsample = 1, colsample_bytree = 1, seed = 33, 
+                lambda = 1, verbose = 0)
+        minError = c(minError, min(cv[4]$evaluation_log$test_error_mean))        
+}
+
+plot(c(2:10), minError, xlab = 'depth of trees', ylab = 'error', type = 'l')
+end_time <- Sys.time()
+end_time - start_time
+
+```
+
+### how lambda affects error
+
+conclusion: lambda 10 would work ok
+
+```{r lambda}
+start_time <- Sys.time()
+testVariable = 'lambda'
+testRange = seq(1, 100, 10)
+minError = c()
+
+for(i in testRange){
+        cv <- xgb.cv(data = credit, nrounds = 10, nfold = 5, metrics = "error",
+                  max_depth = 3, eta = 0.3, objective = "binary:logistic",
+                subsample = 1, colsample_bytree = 1, seed = 33, 
+                lambda = i, verbose = 0)
+        minError = c(minError, min(cv[4]$evaluation_log$test_error_mean))        
+}
+
+plot(testRange, minError, xlab = testVariable, ylab = 'error', type = 'l')
+
+end_time <- Sys.time()
+end_time - start_time
+```
+
+### how eta affects error
+
+```{r eta}
+start_time <- Sys.time()
+testVariable = 'eta'
+testRange = seq(0.0, 1, 0.1)
+minError = c()
+
+for(i in testRange){
+        cv <- xgb.cv(data = credit, nrounds = 10, nfold = 5, metrics = "error",
+                  max_depth = 3, eta = i, objective = "binary:logistic",
+                subsample = 0.8, colsample_bytree = 0.8, seed = 33, 
+                lambda = 10, verbose = 0)
+        minError = c(minError, min(cv[4]$evaluation_log$test_error_mean))        
+}
+
+plot(testRange, minError, xlab = testVariable, ylab = 'error', type = 'l')
+
+end_time <- Sys.time()
+end_time - start_time
+```
