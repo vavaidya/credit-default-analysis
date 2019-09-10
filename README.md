@@ -1,5 +1,5 @@
 # credit-fraud-analysis
-
+![Image of Credit Default](https://github.com/vavaidya/credit-default-analysis/blob/master/credit_default.jpg)
 ## INTRODUCTION
 The Taiwanese economy experienced tremendous growth during the 1990’s, almost doubling in value along with the other countries known as the Asian Tigers. The country’s financial sector was heavily involved in the growth of real estate during this period. However, in the early 2000’s, this growth slowed and banks in Taiwan turned towards consumer lending to continue the expansion. As a result, credit requirements were loosened and consumers were encouraged to spend by borrowing capital
 
